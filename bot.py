@@ -2,6 +2,8 @@ import discord
 from discord.ext import commands
 from datetime import timedelta
 import os
+from aiohttp import web
+import asyncio
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -27,6 +29,26 @@ user_channel_map = {
 
 # 사용할 이모지
 target_emoji = "📌"
+
+# --- aiohttp 웹서버 핸들러 ---
+async def handle(request):
+    return web.Response(text="OK")
+
+async def start_webserver():
+    app = web.Application()
+    app.add_routes([web.get('/', handle)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8000)
+    await site.start()
+
+# 봇 시작 시 웹서버도 함께 실행하도록 설정
+@bot.event
+async def on_ready():
+    print(f'Logged in as {bot.user} (ID: {bot.user.id})')
+    print('------')
+    # 웹서버 시작 (백그라운드에서 실행)
+    bot.loop.create_task(start_webserver())
 
 @bot.event
 async def on_raw_reaction_add(payload):
