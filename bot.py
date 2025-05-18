@@ -62,7 +62,10 @@ async def on_ready():
 
 @bot.event
 async def on_raw_reaction_add(payload):
+    print(f"[DEBUG] Reaction event received: user_id={payload.user_id}, message_id={payload.message_id}, emoji={payload.emoji}, channel_id={payload.channel_id}")
+
     if str(payload.emoji) != target_emoji:
+        print(f"[DEBUG] Ignored emoji: {payload.emoji}")
         return
 
     key = (payload.user_id, payload.message_id, str(payload.emoji))
@@ -70,8 +73,10 @@ async def on_raw_reaction_add(payload):
 
     # 3초 이내에 같은 이벤트가 들어오면 무시
     if key in recent_reactions and now - recent_reactions[key] < 3:
+        print(f"[DEBUG] Duplicate reaction ignored: {key}")
         return
     recent_reactions[key] = now
+    print(f"[DEBUG] Processing reaction: {key}")
 
     user_id = payload.user_id
     channel_id = user_channel_map.get(user_id)
@@ -87,8 +92,8 @@ async def on_raw_reaction_add(payload):
 
     try:
         message = await message_channel.fetch_message(payload.message_id)
-    except:
-        print("❌ 메시지를 불러오지 못함.")
+    except Exception as e:
+        print(f"❌ 메시지를 불러오지 못함: {e}")
         return
 
     guild_id = payload.guild_id
@@ -102,7 +107,6 @@ async def on_raw_reaction_add(payload):
     created_at_kst = message.created_at + timedelta(hours=9)
     formatted_date = created_at_kst.strftime("%Y-%m-%d %H:%M:%S")
 
-    # 메시지 설명 텍스트 결정
     if message.content:
         description_text = message.content
     elif message.attachments:
@@ -125,36 +129,47 @@ async def on_raw_reaction_add(payload):
     )
     embed.set_footer(text=f"작성일시: {formatted_date}")
 
-    # 이미지 첨부 있으면 embed 이미지로 설정
     for attachment in message.attachments:
         if attachment.content_type and attachment.content_type.startswith("image"):
             embed.set_image(url=attachment.url)
             break
 
-    # 1. 북마크 임베드 메시지 전송
-    await target_channel.send(embed=embed)
+    try:
+        await target_channel.send(embed=embed)
+        print("[DEBUG] 북마크 임베드 메시지 전송 완료")
+    except Exception as e:
+        print(f"[ERROR] 임베드 메시지 전송 실패: {e}")
 
-    # 2. 코드 블록이 없고 http 링크가 있을 경우 링크 따로 전송 → Discord 미리보기 유도
     if message.content and "http" in message.content and "```" not in message.content:
-        await target_channel.send(message.content)
+        try:
+            await target_channel.send(message.content)
+            print("[DEBUG] http 링크 메시지 전송 완료")
+        except Exception as e:
+            print(f"[ERROR] http 링크 메시지 전송 실패: {e}")
 
-    # 3. 이미지 외 첨부파일 중 동영상, 파일 따로 전송
     for attachment in message.attachments:
-        if attachment.content_type:
-            if attachment.content_type.startswith("video"):
+        if attachment.content_type and attachment.content_type.startswith("video"):
+            try:
                 await target_channel.send(
                     content=f"🎬 동영상 첨부파일: {attachment.filename}",
                     file=await attachment.to_file()
                 )
+                print(f"[DEBUG] 동영상 첨부파일 전송 완료: {attachment.filename}")
+            except Exception as e:
+                print(f"[ERROR] 동영상 첨부파일 전송 실패: {e}")
 
     non_image_non_video_attachments = [
         attachment for attachment in message.attachments
         if not (attachment.content_type and (attachment.content_type.startswith("image") or attachment.content_type.startswith("video")))
     ]
     for attachment in non_image_non_video_attachments:
-        await target_channel.send(
-            content=f"📎 첨부파일: {attachment.filename}",
-            file=await attachment.to_file()
-        )
+        try:
+            await target_channel.send(
+                content=f"📎 첨부파일: {attachment.filename}",
+                file=await attachment.to_file()
+            )
+            print(f"[DEBUG] 일반 첨부파일 전송 완료: {attachment.filename}")
+        except Exception as e:
+            print(f"[ERROR] 일반 첨부파일 전송 실패: {e}")
 
 bot.run(os.getenv("DISCORD_TOKEN"))
