@@ -1,5 +1,6 @@
 import os
 import asyncio
+import time
 from datetime import timedelta
 
 import discord
@@ -12,7 +13,6 @@ from keep_alive import keep_alive
 # --- 외부 서비스 시작 ---
 keep_alive()
 
-
 intents = discord.Intents.default()
 intents.message_content = True
 intents.reactions = True
@@ -22,21 +22,24 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 # 유저 ID와 채널 ID 매핑
 user_channel_map = {
-    447077829130321921: 1373128857481252954, #서하
-    285716819577143296: 1373128925361868811, #차보롬
-    1338669217339408416: 1373166441200619570, #윤서하
-    529695644760276992: 1373166919439355984, #김창윤
-    949706769473601616: 1373167015925121164, #소윤
-    1038379785346351164: 1373167043746201661, #영범이형
-    352810254574026753: 1373167063874535525, #오동욱
-    1338668174840954933: 1373167084527423498, #이원희
-    941189989474119720: 1373167106656567327, #졸려pt
-    562877071794110464: 1373167130656243722, #충교
-    920744940445777960: 1373167181726089297, #큐띠뽀짝현재쨩
+    447077829130321921: 1373128857481252954,  # 서하
+    285716819577143296: 1373128925361868811,  # 차보롬
+    1338669217339408416: 1373166441200619570,  # 윤서하
+    529695644760276992: 1373166919439355984,  # 김창윤
+    949706769473601616: 1373167015925121164,  # 소윤
+    1038379785346351164: 1373167043746201661,  # 영범이형
+    352810254574026753: 1373167063874535525,  # 오동욱
+    1338668174840954933: 1373167084527423498,  # 이원희
+    941189989474119720: 1373167106656567327,  # 졸려pt
+    562877071794110464: 1373167130656243722,  # 충교
+    920744940445777960: 1373167181726089297,  # 큐띠뽀짝현재쨩
 }
 
 # 사용할 이모지
 target_emoji = "📌"
+
+# 최근 반응 저장용 (중복 필터링)
+recent_reactions = {}
 
 # --- aiohttp 웹서버 핸들러 ---
 async def handle(request):
@@ -55,13 +58,20 @@ async def start_webserver():
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     print('------')
-    # 웹서버 시작 (백그라운드에서 실행)
     bot.loop.create_task(start_webserver())
 
 @bot.event
 async def on_raw_reaction_add(payload):
     if str(payload.emoji) != target_emoji:
         return
+
+    key = (payload.user_id, payload.message_id, str(payload.emoji))
+    now = time.time()
+
+    # 3초 이내에 같은 이벤트가 들어오면 무시
+    if key in recent_reactions and now - recent_reactions[key] < 3:
+        return
+    recent_reactions[key] = now
 
     user_id = payload.user_id
     channel_id = user_channel_map.get(user_id)
@@ -129,7 +139,6 @@ async def on_raw_reaction_add(payload):
         await target_channel.send(message.content)
 
     # 3. 이미지 외 첨부파일 중 동영상, 파일 따로 전송
-    # 동영상 먼저 보내고, 그 외 파일 보내기
     for attachment in message.attachments:
         if attachment.content_type:
             if attachment.content_type.startswith("video"):
