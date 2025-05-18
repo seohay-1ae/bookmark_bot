@@ -1,4 +1,5 @@
 import os
+import sys
 import asyncio
 import time
 from datetime import timedelta
@@ -8,7 +9,6 @@ from discord.ext import commands
 from aiohttp import web
 
 from keep_alive import keep_alive
-
 
 # --- 외부 서비스 시작 ---
 keep_alive()
@@ -53,15 +53,18 @@ async def start_webserver():
     site = web.TCPSite(runner, '0.0.0.0', 8000)
     await site.start()
 
-# 봇 시작 시 웹서버도 함께 실행하도록 설정
+print(f"[DEBUG] Bot starting: PID={os.getpid()}, BOT_USER={bot.user} if ready")
+
 @bot.event
 async def on_ready():
+    print(f"[DEBUG] on_ready called: PID={os.getpid()}, BOT_USER={bot.user}")
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     print('------')
     bot.loop.create_task(start_webserver())
 
 @bot.event
 async def on_raw_reaction_add(payload):
+    print(f"[DEBUG] Reaction event received: user_id={payload.user_id}, message_id={payload.message_id}, emoji={payload.emoji}, PID={os.getpid()}")
     print(f"[DEBUG] Reaction event received: user_id={payload.user_id}, message_id={payload.message_id}, emoji={payload.emoji}, channel_id={payload.channel_id}")
 
     if str(payload.emoji) != target_emoji:
