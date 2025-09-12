@@ -1,0 +1,28 @@
+# 환경변수 파일
+.env
+
+# Python 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 가상환경
+venv/
+env/
+ENV/
+
+# IDE 설정 파일
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 로그 파일
+*.log
+
+# 운영체제 파일
+.DS_Store
+Thumbs.db
+
+# 매핑 데이터 파일 (선택사항 - 백업용으로 유지하려면 주석 처리)
+# user_channel_mapping.json
