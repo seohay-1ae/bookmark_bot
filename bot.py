@@ -7,8 +7,73 @@ from datetime import timedelta
 import discord
 from discord.ext import commands
 from aiohttp import web
+from dotenv import load_dotenv
 
 from keep_alive import keep_alive
+
+# .env 파일 로드
+load_dotenv()
+
+# JSON 파일로 매핑 데이터 관리
+import json
+
+MAPPING_FILE = "user_channel_mapping.json"
+
+def load_mapping():
+    """JSON 파일에서 매핑 데이터 로드 (서버별 구조)"""
+    try:
+        with open(MAPPING_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('guild_mappings', {})
+    except FileNotFoundError:
+        return {}
+
+def save_mapping(mapping):
+    """매핑 데이터를 JSON 파일에 저장 (서버별 구조)"""
+    data = {'guild_mappings': mapping}
+    with open(MAPPING_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def get_user_mapping(guild_id, user_id):
+    """특정 서버에서 사용자의 매핑을 가져옴"""
+    guild_mappings = load_mapping()
+    guild_id_str = str(guild_id)
+    user_id_str = str(user_id)
+    
+    if guild_id_str in guild_mappings:
+        return guild_mappings[guild_id_str].get(user_id_str)
+    return None
+
+def set_user_mapping(guild_id, user_id, channel_id):
+    """특정 서버에서 사용자의 매핑을 설정함"""
+    guild_mappings = load_mapping()
+    guild_id_str = str(guild_id)
+    user_id_str = str(user_id)
+    channel_id_str = str(channel_id)
+    
+    if guild_id_str not in guild_mappings:
+        guild_mappings[guild_id_str] = {}
+    
+    guild_mappings[guild_id_str][user_id_str] = channel_id_str
+    save_mapping(guild_mappings)
+
+def remove_user_mapping(guild_id, user_id):
+    """특정 서버에서 사용자의 매핑을 삭제함"""
+    guild_mappings = load_mapping()
+    guild_id_str = str(guild_id)
+    user_id_str = str(user_id)
+    
+    if guild_id_str in guild_mappings and user_id_str in guild_mappings[guild_id_str]:
+        del guild_mappings[guild_id_str][user_id_str]
+        save_mapping(guild_mappings)
+        return True
+    return False
+
+def get_guild_mappings(guild_id):
+    """특정 서버의 모든 매핑을 가져옴"""
+    guild_mappings = load_mapping()
+    guild_id_str = str(guild_id)
+    return guild_mappings.get(guild_id_str, {})
 
 # --- 외부 서비스 시작 ---
 keep_alive()
@@ -20,29 +85,34 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 유저 ID와 채널 ID 매핑
-user_channel_map = {
-    447077829130321921: 1373128857481252954,  # 서하
-    285716819577143296: 1373128925361868811,  # 차보롬
-    1338669217339408416: 1373166441200619570,  # 윤서하
-    529695644760276992: 1373166919439355984,  # 김창윤
-    949706769473601616: 1373167015925121164,  # 소윤
-    1038379785346351164: 1373167043746201661,  # 영범이형
-    352810254574026753: 1373167063874535525,  # 오동욱
-    1338668174840954933: 1373167084527423498,  # 이원희
-    941189989474119720: 1373167106656567327,  # 졸려pt
-    562877071794110464: 1373167130656243722,  # 충교
-    920744940445777960: 1373167181726089297,  # 큐띠뽀짝현재쨩
-    459378313853534218: 1373928068451663972,  #유영근
-}
+# 서버별 매핑은 함수로 관리 (JSON 파일에서 로드)
 
 # 사용할 이모지
 target_emoji = "📌"
 
 # 최근 반응 저장용 (중복 필터링)
 recent_reactions = {}
+CLEANUP_INTERVAL = 300  # 5분
+last_cleanup = time.time()
 
-# --- aiohttp 웹서버 핸들러 ---
+def cleanup_old_reactions():
+    #오래된 반응 기록들을 정리
+    global last_cleanup
+    now = time.time()
+    
+    if now - last_cleanup > CLEANUP_INTERVAL:
+        old_keys = [
+            key for key, timestamp in recent_reactions.items()
+            if now - timestamp > 3
+        ]
+        for key in old_keys:
+            del recent_reactions[key]
+        
+        last_cleanup = now
+        if old_keys:  # 정리된 항목이 있을 때만 로그 출력
+            print(f"[DEBUG] Cleaned up {len(old_keys)} old reactions")
+
+#  aiohttp 웹서버 핸들러
 async def handle(request):
     return web.Response(text="OK")
 
@@ -62,6 +132,13 @@ async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     print('------')
     bot.loop.create_task(start_webserver())
+    
+    # 슬래시 명령어 동기화
+    try:
+        synced = await bot.tree.sync()
+        print(f"[DEBUG] Synced {len(synced)} slash commands")
+    except Exception as e:
+        print(f"[ERROR] Failed to sync slash commands: {e}")
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -75,6 +152,9 @@ async def on_raw_reaction_add(payload):
     key = (payload.user_id, payload.message_id, str(payload.emoji))
     now = time.time()
 
+    # 정리 작업 먼저 실행
+    cleanup_old_reactions()
+
     # 3초 이내에 같은 이벤트가 들어오면 무시
     if key in recent_reactions and now - recent_reactions[key] < 3:
         print(f"[DEBUG] Duplicate reaction ignored: {key}")
@@ -83,10 +163,22 @@ async def on_raw_reaction_add(payload):
     print(f"[DEBUG] Processing reaction: {key}")
 
     user_id = payload.user_id
-    channel_id = user_channel_map.get(user_id)
+    guild_id = payload.guild_id
+    
+    # 서버별 매핑에서 사용자의 채널 찾기
+    channel_id = get_user_mapping(guild_id, user_id)
+    print(f"[DEBUG] Found mapping: guild_id={guild_id}, user_id={user_id}, channel_id={channel_id}")
 
     if not channel_id:
-        print(f"⚠️ 유저 {user_id}에 대한 채널 매핑이 없음.")
+        print(f"⚠️ 서버 {guild_id}에서 유저 {user_id}에 대한 채널 매핑이 없음.")
+        return
+    
+    # 채널 ID를 정수로 변환
+    try:
+        channel_id = int(channel_id)
+        print(f"[DEBUG] Converted channel_id to int: {channel_id}")
+    except (ValueError, TypeError):
+        print(f"❌ 잘못된 채널 ID 형식: {channel_id}")
         return
 
     message_channel = bot.get_channel(payload.channel_id)
@@ -175,5 +267,161 @@ async def on_raw_reaction_add(payload):
             print(f"[DEBUG] 일반 첨부파일 전송 완료: {attachment.filename}")
         except Exception as e:
             print(f"[ERROR] 일반 첨부파일 전송 실패: {e}")
+
+# 슬래시 명령어
+@bot.tree.command(name="add", description="사용자-채널 매핑을 추가합니다")
+async def add(interaction: discord.Interaction, user: discord.Member, channel: discord.TextChannel):
+    """사용자와 채널을 매핑합니다"""
+    
+    # 권한 확인 (관리자 또는 본인만 가능)
+    if not interaction.user.guild_permissions.administrator and interaction.user.id != user.id:
+        await interaction.response.send_message("❌ 이 명령어는 관리자 또는 본인만 사용할 수 있습니다.", ephemeral=True)
+        return
+    
+    # 현재 서버의 모든 매핑 가져오기
+    guild_mappings = get_guild_mappings(interaction.guild_id)
+    
+    # 해당 채널이 이미 다른 사용자에게 매핑되어 있는지 확인
+    for existing_user_id, existing_channel_id in guild_mappings.items():
+        if str(existing_channel_id) == str(channel.id) and str(existing_user_id) != str(user.id):
+            # 이미 매핑된 사용자 정보 가져오기
+            existing_user = bot.get_user(int(existing_user_id))
+            existing_user_name = existing_user.display_name if existing_user else f"사용자 ID: {existing_user_id}"
+            
+            # 경고 메시지와 함께 현재 매핑 상황 표시
+            embed = discord.Embed(
+                title="⚠️ 채널 중복 매핑 경고",
+                description=f"**{channel.name}** 채널은 이미 **{existing_user_name}**이 사용 중입니다.",
+                color=0xff6b6b
+            )
+            
+            # 현재 매핑 목록 추가
+            if guild_mappings:
+                embed.add_field(
+                    name="📌 현재 서버의 매핑 상황",
+                    value="이 외의 다른 채널을 선택해주세요. 채널이 없다면 생성해주세요. 채널명에 본인의 닉네임을 명시하시면 좋습니다.",
+                    inline=False
+                )
+                
+                for user_id, channel_id in guild_mappings.items():
+                    try:
+                        mapped_user = bot.get_user(int(user_id))
+                        mapped_channel = bot.get_channel(int(channel_id))
+                        
+                        if mapped_user and mapped_channel:
+                            embed.add_field(
+                                name=f"😃 {mapped_user.display_name}",
+                                value=f"🖥️ {mapped_channel.name}",
+                                inline=True
+                            )
+                    except:
+                        embed.add_field(
+                            name=f"❓ 사용자 ID: {user_id}",
+                            value=f"❓ 채널 ID: {channel_id}",
+                            inline=True
+                        )
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+    
+    # 중복이 없으면 매핑 추가
+    set_user_mapping(interaction.guild_id, user.id, channel.id)
+    
+    await interaction.response.send_message(
+        f"✅ **{user.display_name}** → **{channel.name}** 매핑이 완료되었습니다!",
+        ephemeral=True
+    )
+
+@bot.tree.command(name="remove", description="사용자-채널 매핑을 삭제합니다")
+async def remove(interaction: discord.Interaction, user: discord.Member):
+    """사용자의 매핑을 삭제합니다"""
+    
+    # 권한 확인 (관리자 또는 본인만 가능)
+    if not interaction.user.guild_permissions.administrator and interaction.user.id != user.id:
+        await interaction.response.send_message("❌ 이 명령어는 관리자 또는 본인만 사용할 수 있습니다.", ephemeral=True)
+        return
+    
+    # 서버별 매핑 삭제
+    if remove_user_mapping(interaction.guild_id, user.id):
+        await interaction.response.send_message(
+            f"✅ **{user.display_name}**의 매핑이 삭제되었습니다!",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"❌ **{user.display_name}**의 매핑을 찾을 수 없습니다.",
+            ephemeral=True
+        )
+
+@bot.tree.command(name="list", description="현재 서버의 모든 매핑을 보여줍니다")
+async def list(interaction: discord.Interaction):
+    """현재 서버의 매핑 목록을 보여줍니다"""
+    
+    # 현재 서버의 매핑 가져오기
+    guild_mappings = get_guild_mappings(interaction.guild_id)
+    
+    if not guild_mappings:
+        await interaction.response.send_message("📝 현재 서버에 등록된 매핑이 없습니다.", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title=f"📌 {interaction.guild.name} 서버 북마크 매핑 목록",
+        color=0x1abc9c
+    )
+    
+    for user_id, channel_id in guild_mappings.items():
+        try:
+            user = bot.get_user(int(user_id))
+            channel = bot.get_channel(int(channel_id))
+            
+            if user and channel:
+                embed.add_field(
+                    name=f"😃 {user.display_name}",
+                    value=f"🖥️ {channel.name}",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name=f"❓ 사용자 ID: {user_id}",
+                    value=f"❓ 채널 ID: {channel_id}",
+                    inline=False
+                )
+        except:
+            embed.add_field(
+                name=f"❓ 사용자 ID: {user_id}",
+                value=f"❓ 채널 ID: {channel_id}",
+                inline=False
+            )
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="clear", description="현재 서버의 모든 매핑을 삭제합니다")
+async def clear(interaction: discord.Interaction):
+    """현재 서버의 모든 매핑을 삭제합니다"""
+    
+    # 권한 확인 (관리자만 가능)
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("❌ 이 명령어는 관리자만 사용할 수 있습니다.", ephemeral=True)
+        return
+    
+    # 현재 서버의 매핑 가져오기
+    guild_mappings = get_guild_mappings(interaction.guild_id)
+    count = len(guild_mappings)
+    
+    if count == 0:
+        await interaction.response.send_message("📝 삭제할 매핑이 없습니다.", ephemeral=True)
+        return
+    
+    # 현재 서버의 매핑만 삭제
+    guild_mappings = load_mapping()
+    guild_id_str = str(interaction.guild_id)
+    if guild_id_str in guild_mappings:
+        del guild_mappings[guild_id_str]
+        save_mapping(guild_mappings)
+    
+    await interaction.response.send_message(
+        f"✅ 현재 서버의 모든 매핑이 삭제되었습니다! (총 {count}개)",
+        ephemeral=True
+    )
 
 bot.run(os.getenv("DISCORD_TOKEN"))
