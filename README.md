@@ -38,4 +38,4 @@
 ---
 
 프로젝트 관련 자세한 내용과 회고는 Velog 및 GitHub 레포지토리를 참고해 주세요.
-- [Velog 개발일지 및 회고](https://velog.io/@seoha1ae/series/db.jar)
+- [Velog 개발일지 및 회고](https://velog.io/@seoha1ae/%EC%82%AC%EC%9D%B4%EB%93%9C-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-bookmarkbot)
